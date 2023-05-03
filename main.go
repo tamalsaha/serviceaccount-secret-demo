@@ -3,8 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"time"
+
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -63,7 +64,7 @@ func useGeneratedClient() error {
 		return err
 	}
 
-	err = wait.PollImmediateInfinite(10*time.Second, func() (done bool, err error) {
+	err = wait.PollImmediate(10*time.Second, 10*time.Minute, func() (done bool, err error) {
 		secret, err = kc.CoreV1().Secrets(ns).Get(ctx, name+"-token", metav1.GetOptions{})
 		if err != nil {
 			return false, err
