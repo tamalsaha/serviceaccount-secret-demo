@@ -3,50 +3,23 @@ package main
 import (
 	"context"
 	"fmt"
+	"time"
+
+	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/klog/v2/klogr"
-	dbapi "kubedb.dev/apimachinery/apis/kubedb/v1alpha2"
-	kubedbclient "kubedb.dev/apimachinery/client/clientset/versioned"
-	kubedbscheme "kubedb.dev/apimachinery/client/clientset/versioned/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 )
 
-func NewClient() (client.Client, error) {
-	scheme := runtime.NewScheme()
-	_ = clientgoscheme.AddToScheme(scheme)
-	// NOTE: Register KubeDB api types
-	_ = kubedbscheme.AddToScheme(scheme)
-
-	ctrl.SetLogger(klogr.New())
-	cfg := ctrl.GetConfigOrDie()
-	cfg.QPS = 100
-	cfg.Burst = 100
-
-	mapper, err := apiutil.NewDynamicRESTMapper(cfg)
-	if err != nil {
-		return nil, err
-	}
-
-	return client.New(cfg, client.Options{
-		Scheme: scheme,
-		Mapper: mapper,
-		//Opts: client.WarningHandlerOptions{
-		//	SuppressWarnings:   false,
-		//	AllowDuplicateLogs: false,
-		//},
-	})
-}
-
 func main() {
 	if err := useGeneratedClient(); err != nil {
-		panic(err)
-	}
-	if err := useKubebuilderClient(); err != nil {
 		panic(err)
 	}
 }
@@ -57,36 +30,49 @@ func useGeneratedClient() error {
 	cfg.QPS = 100
 	cfg.Burst = 100
 
-	kc, err := kubedbclient.NewForConfig(cfg)
+	var err error
+	kc, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
 		return err
 	}
 
-	var pglist *dbapi.PostgresList
-	pglist, err = kc.KubedbV1alpha2().Postgreses(metav1.NamespaceAll).List(context.TODO(), metav1.ListOptions{})
-	if err != nil {
-		return err
-	}
-	for _, db := range pglist.Items {
-		fmt.Println(client.ObjectKeyFromObject(&db))
-	}
-	return nil
-}
+	ns := "default"
+	name := "vault"
+	ctx := context.TODO()
 
-func useKubebuilderClient() error {
-	fmt.Println("Using kubebuilder client")
-	kc, err := NewClient()
+	sa := &core.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: ns,
+			Name:      name,
+		},
+	}
+
+	sa, err = kc.CoreV1().ServiceAccounts(ns).Create(ctx, sa, metav1.CreateOptions{})
 	if err != nil {
 		return err
 	}
 
-	var pglist dbapi.PostgresList
-	err = kc.List(context.TODO(), &pglist)
+	secret := &core.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: ns,
+			Name:      name + "-token",
+			Annotations: map[string]string{
+				core.ServiceAccountNameKey: name,
+			},
+		},
+		Type: core.SecretTypeServiceAccountToken,
+	}
+	secret, err = kc.CoreV1().Secrets(ns).Create(ctx, secret, metav1.CreateOptions{})
 	if err != nil {
 		return err
 	}
-	for _, db := range pglist.Items {
-		fmt.Println(client.ObjectKeyFromObject(&db))
-	}
-	return nil
+
+	err = wait.PollImmediateInfinite(30*time.Second, func() (done bool, err error) {
+		secret, err = kc.CoreV1().Secrets(ns).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return false, err
+		}
+		return len(secret.Data) > 0, nil
+	})
+	return err
 }
