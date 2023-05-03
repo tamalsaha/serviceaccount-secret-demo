@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"time"
 
 	core "k8s.io/api/core/v1"
@@ -43,7 +44,7 @@ func useGeneratedClient() error {
 	}
 
 	sa, err = kc.CoreV1().ServiceAccounts(ns).Create(ctx, sa, metav1.CreateOptions{})
-	if err != nil {
+	if client.IgnoreAlreadyExists(err) != nil {
 		return err
 	}
 
@@ -58,12 +59,12 @@ func useGeneratedClient() error {
 		Type: core.SecretTypeServiceAccountToken,
 	}
 	secret, err = kc.CoreV1().Secrets(ns).Create(ctx, secret, metav1.CreateOptions{})
-	if err != nil {
+	if client.IgnoreAlreadyExists(err) != nil {
 		return err
 	}
 
-	err = wait.PollImmediateInfinite(30*time.Second, func() (done bool, err error) {
-		secret, err = kc.CoreV1().Secrets(ns).Get(ctx, name, metav1.GetOptions{})
+	err = wait.PollImmediateInfinite(10*time.Second, func() (done bool, err error) {
+		secret, err = kc.CoreV1().Secrets(ns).Get(ctx, name+"-token", metav1.GetOptions{})
 		if err != nil {
 			return false, err
 		}
